@@ -28,7 +28,7 @@ import seaborn as sns
 
 sns.set()
 
-from perslay.utils import apply_graph_extended_persistence, get_base_simplex
+from .perslay.perslay.utils import apply_graph_extended_persistence, get_base_simplex
 
 _graph_dtypes = ["dgmOrd0", "dgmExt0", "dgmRel1", "dgmExt1"]
 
