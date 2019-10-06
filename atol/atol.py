@@ -148,7 +148,7 @@ def graph_tenfold(graph_folder, atol_params):
                              columns=["index", "type", "center", "value", "label"])
         time2 = time.time()
 
-        fitted_learner = _fit(learner=RandomForestClassifier(),
+        fitted_learner = _fit(learner=RandomForestClassifier(n_estimators=100),
                               train_feats=feats[np.isin(feats[sampling], train_indices)].groupby([sampling]))
         test_score = _predict(learner=fitted_learner,
                               test_feats=feats[np.isin(feats[sampling], test_indices)].groupby([sampling]))
