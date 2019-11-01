@@ -1,6 +1,7 @@
 # coding: utf-8
 """
 @author: Martin Royer
+@copyright: INRIA
 """
 
 import os

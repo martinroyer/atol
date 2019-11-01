@@ -1,6 +1,7 @@
 # atol: python3 package for _ATOL: Automatic Topologically-Oriented Learning_
 
 **Author**: Martin Royer
+**Copyright**: INRIA
 
 # Description
 
