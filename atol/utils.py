@@ -17,7 +17,7 @@ from scipy.sparse import csgraph
 from scipy.linalg import eigh
 from scipy.io import loadmat
 
-from sklearn.metrics import balanced_accuracy_score
+from sklearn.metrics import accuracy_score
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import LabelEncoder
 
@@ -78,7 +78,7 @@ def atol_feats_graphs(graph_folder, all_diags, atol_objs):
     return feats
 
 
-def _predict(learner, test_feats, score=balanced_accuracy_score):
+def _predict(learner, test_feats, score=accuracy_score):
     x_test, y_test = test_feats.apply(lambda _: _["value"].values), LabelEncoder().fit_transform(
         test_feats.apply(lambda _: _["label"].values[0]))
     y_test_pred = learner.predict(list(x_test))
@@ -87,7 +87,7 @@ def _predict(learner, test_feats, score=balanced_accuracy_score):
     return test_score
 
 
-def _fit(learner, train_feats, score=balanced_accuracy_score):
+def _fit(learner, train_feats, score=accuracy_score):
     x_train, y_train = train_feats.apply(lambda _: _["value"].values), LabelEncoder().fit_transform(
         train_feats.apply(lambda _: _["label"].values[0]))
     learner.fit(list(x_train), y_train)
@@ -122,7 +122,7 @@ def graph_tenfold(graph_folder, atol_params):
 
         time1 = time.time()
         for dtype, filt in product(graph_dtypes, filtrations):
-            atol_objs[(dtype, filt)].fit(diags=np.concatenate([all_diags[(dtype, filt, gid)] for gid in train_indices]))
+            atol_objs[(dtype, filt)].fit(diags=[all_diags[(dtype, filt, gid)] for gid in train_indices])
         feats = pd.DataFrame(atol_feats_graphs(graph_folder, all_diags, atol_objs),
                              columns=["index", "type", "center", "value", "label"])
         time2 = time.time()

@@ -24,7 +24,7 @@ def weighting_switch(viewpoint):
         "None": lambda _: None,
         "cloud": lambda diags: np.concatenate([ np.ones(shape=diag.shape[0]) for diag in diags ]),
         "measure": lambda diags: np.concatenate([ np.ones(shape=diag.shape[0]) / diag.shape[0] for diag in diags ]),
-    }.get(viewpoint, "None")
+    }.get(viewpoint, "cloud")
 
 
 class Atol(BaseEstimator, ClusterMixin, TransformerMixin):
@@ -78,6 +78,6 @@ class Atol(BaseEstimator, ClusterMixin, TransformerMixin):
         :param diag: entry diagram to vectorise
         :return: array of size `n_centers`
         """
-        weights = self.weighting_method(diag)[0]
-        diag_atol = self.aggreg(self.method(diag, self.centers, self.inertias.T)*weights, axis=0)
+        weight = self.weighting_method(diag)
+        diag_atol = self.aggreg(self.method(diag, self.centers, self.inertias.T)*(weight[0] if weight is not None else 1), axis=0)
         return diag_atol
