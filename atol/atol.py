@@ -7,77 +7,120 @@
 import numpy as np
 
 from sklearn.metrics import pairwise
-from sklearn.base import BaseEstimator, ClusterMixin, TransformerMixin
-from sklearn.cluster import KMeans, MiniBatchKMeans
+from sklearn.base import BaseEstimator, TransformerMixin
 
 
-def lapl_feats(diags, centers, inertias, eps=1e-10):
-    return np.exp(-np.sqrt(pairwise.pairwise_distances(diags, Y=centers) / (inertias + eps)))
+def _lapl_contrast(measure, centers, inertias, eps=1e-8):
+    return np.exp(-np.sqrt(pairwise.pairwise_distances(measure, Y=centers) / (inertias + eps)))
+
+def _gaus_contrast(measure, centers, inertias, eps=1e-8):
+    return np.exp(-pairwise.pairwise_distances(measure, Y=centers) / (inertias + eps))
+
+def _indicator_contrast(diags, centers, inertias, eps=1e-8):
+    pair_dist = pairwise.pairwise_distances(diags, Y=centers)
+    flat_circ = (pair_dist < (inertias+eps)).astype(int)
+    robe_curve = np.positive((2-pair_dist/(inertias+eps))*((inertias+eps) < pair_dist).astype(int))
+    return flat_circ + robe_curve
+
+def _cloud_weighting(measure):
+    return np.ones(shape=measure.shape[0])
+
+def _measure_weighting(measure):
+    return np.ones(shape=measure.shape[0]) / measure.shape[0]
+
+def _iidproba_weighting(measure):
+    return np.ones(shape=measure.shape[0]) / measure.shape[0]**2
 
 
-def gaus_feats(diags, centers, inertias, eps=1e-10):
-    return np.exp(-pairwise.pairwise_distances(diags, Y=centers) / (inertias + eps))
-
-
-def weighting_switch(viewpoint):
-    return {
-        "None": lambda _: None,
-        "cloud": lambda diags: np.concatenate([ np.ones(shape=diag.shape[0]) for diag in diags ]),
-        "measure": lambda diags: np.concatenate([ np.ones(shape=diag.shape[0]) / diag.shape[0] for diag in diags ]),
-    }.get(viewpoint, "cloud")
-
-
-class Atol(BaseEstimator, ClusterMixin, TransformerMixin):
-    """Atol learning
-        Read more in [https://arxiv.org/abs/1909.13472]
+class Atol(BaseEstimator, TransformerMixin):
     """
+    This class allows to vectorise measures (e.g. point clouds, persistence diagrams, etc) after a quantisation step.
 
-    def __init__(self, n_centers=5, method=lapl_feats, aggreg=np.sum, viewpoint="None", batch_size=0, n_calib=-1):
-        self.n_calib = n_calib
-        self.n_centers = n_centers
-        self.r_centers = n_centers
-        self.method = method
-        self.batch_size = batch_size
-        self.aggreg = aggreg
-        self.centers = np.ones(shape=(n_centers, 2))*np.inf
-        self.inertias = np.ones(shape=(n_centers, 1))*np.inf
-        self.weighting_method = weighting_switch(viewpoint)
-
-    def fit(self, diags):
+    ATOL paper: https://arxiv.org/abs/1909.13472
+    """
+    def __init__(self, quantiser, weighting_method="cloud", contrast="gaus"):
         """
-        Calibration step: learn centers and inertias from current available diagrams.
-        @todo: si c'est un array Nx2,
+        Constructor for the Atol measure vectorisation class.
 
-        :param diags: list of diagrams from which to learn center locations and cluster spread
-        :return: None
+        Parameters:
+            quantiser (Object): Object with `fit` (sklearn API consistent) and `cluster_centers` and `n_clusters`
+                attributes (default: MiniBatchKMeans()). This object will be fitted by the function `fit`.
+            weighting_method (function): constant generic function for weighting the measure points
+                (default: constant function, i.e. the measure is seen as a point cloud by default).
+                This will have no impact if weights are provided along with measures all the way: `fit` and `transform`.
+            contrast (string): constant function for evaluating proximity of a measure with respect to centers
+                (default: laplacian contrast function, see page 3 in the ATOL paper).
         """
-        if self.n_calib > 0:
-            diags = diags[:self.n_calib]
-        elif self.n_calib == 0:
-            diags = np.random.rand(self.n_centers, 2)
-        weights = self.weighting_method(diags)
-        diags_concat = np.concatenate(diags)
-        kmeans = KMeans() if not self.batch_size else MiniBatchKMeans(batch_size=self.batch_size)
-        kmeans.n_clusters = self.r_centers
-        kmeans.fit(diags_concat, sample_weight=weights)
-        labels = np.argmin(pairwise.pairwise_distances(diags_concat, Y=kmeans.cluster_centers_), axis=1)
-        self.centers  = np.array([kmeans.cluster_centers_[lab,:] for lab in np.unique(labels)])
+        self.quantiser = quantiser
+        self.contrast = {
+            "gaus": _gaus_contrast,
+            "lapl": _lapl_contrast,
+            "indi": _indicator_contrast,
+        }.get(contrast, _gaus_contrast)
+        self.centers = np.ones(shape=(self.quantiser.n_clusters, 2))*np.inf
+        self.inertias = np.full(self.quantiser.n_clusters, np.nan)
+        self.weighting_method = {
+            "cloud"   : _cloud_weighting,
+            "measure" : _measure_weighting,
+            "iidproba": _iidproba_weighting,
+        }.get(weighting_method, _cloud_weighting)
+
+    def fit(self, X, y=None, sample_weight=None):
+        """
+        Calibration step: fit centers to the sample measures and derive inertias between centers.
+
+        Parameters:
+            X (list N x d numpy arrays): input measures in R^d from which to learn center locations and inertias
+                (measures can have different N).
+            y: Ignored, present for API consistency by convention.
+            sample_weight (list of numpy arrays): weights for each measure point in X, optional.
+                If None, the object's weighting_method will be used.
+
+        Returns:
+            self
+        """
+        if not hasattr(self.quantiser, 'fit'):
+            raise TypeError("quantiser %s has no `fit` attribute." % (self.quantiser))
+
+        if sample_weight is None:
+            sample_weight = np.concatenate([self.weighting_method(measure) for measure in X])
+
+        measures_concat = np.concatenate(X)
+        self.quantiser.fit(X=measures_concat, sample_weight=sample_weight)
+        self.centers = self.quantiser.cluster_centers_
+        labels = np.argmin(pairwise.pairwise_distances(measures_concat, Y=self.centers), axis=1)
         dist_centers = pairwise.pairwise_distances(self.centers)
         np.fill_diagonal(dist_centers, np.inf)
         self.inertias = np.min(dist_centers, axis=0)/2
-        self.r_centers = np.size(np.unique(labels))
-        # self.inertias = np.array([[KMeans(n_clusters=1).fit(diags_concat[labels == lab, :],
-        #                     sample_weight=weights[labels == lab]).inertia_] for lab in np.unique(labels)])
         return self
 
-    def transform(self, diag):
+    def __call__(self, measure, sample_weight=None):
         """
-        Vectorisation step: vectorise a diagram given the current centers and inertias.
-        Without proper calibration, default value should produce NaNs.
+        Apply measure vectorisation on a single measure.
 
-        :param diag: entry diagram to vectorise
-        :return: array of size `n_centers`
+        Parameters:
+            measure (n x d numpy array): input measure in R^d.
+
+        Returns:
+            numpy array in R^self.quantiser.n_clusters.
         """
-        weight = self.weighting_method(diag)
-        diag_atol = self.aggreg(self.method(diag, self.centers, self.inertias.T)*(weight[0] if weight is not None else 1), axis=0)
-        return diag_atol
+        if sample_weight is None:
+            sample_weight = self.weighting_method(measure)
+        return np.sum(sample_weight * self.contrast(measure, self.centers, self.inertias.T).T, axis=1)
+
+    def transform(self, X, sample_weight=None):
+        """
+        Apply measure vectorisation on a list of measures.
+
+        Parameters:
+            X (list N x d numpy arrays): input measures in R^d from which to learn center locations and inertias
+                (measures can have different N).
+            sample_weight (list of numpy arrays): weights for each measure point in X, optional.
+                If None, the object's weighting_method will be used.
+
+        Returns:
+            numpy array with shape (number of measures) x (self.quantiser.n_clusters).
+        """
+        if sample_weight is None:
+            sample_weight = [self.weighting_method(measure) for measure in X]
+        return np.stack([self(measure, sample_weight=weight) for measure, weight in zip(X, sample_weight)])

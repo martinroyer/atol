@@ -11,7 +11,7 @@ setup(
 	install_requires=[
           'numpy', 'scipy', 'scikit-learn'
       ],
-    version = '1.0.0',
+    version = '1.1.0',
     description = 'Implementation of ATOL paper',
     author='Martin Royer',
     author_email='martinpierreroyer@gmail.com',

@@ -20,6 +20,7 @@ from scipy.io import loadmat
 from sklearn.metrics import accuracy_score
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import LabelEncoder
+from sklearn.cluster import MiniBatchKMeans
 
 from perslay.utils import apply_graph_extended_persistence, get_base_simplex
 from .atol import Atol
@@ -27,7 +28,7 @@ from .atol import Atol
 graph_dtypes = ["dgmOrd0", "dgmExt0", "dgmRel1", "dgmExt1"]
 
 
-def compute_tda_for_graphs(atol_params, graph_folder):
+def compute_tda_for_graphs(graph_folder, filtrations):
     diag_repo = graph_folder + "diagrams/"
     if os.path.exists(diag_repo) and os.path.isdir(diag_repo):
         shutil.rmtree(diag_repo)
@@ -44,7 +45,7 @@ def compute_tda_for_graphs(atol_params, graph_folder):
         name = graph_name.split("_")
         gid = int(name[name.index("gid") + 1]) - 1
         egvals, egvectors = eigh(csgraph.laplacian(A, normed=True))
-        for filtration in atol_params["filtrations"]:
+        for filtration in filtrations:
             time = float(filtration.split("-")[0])
             filtration_val = np.square(egvectors).dot(np.diag(np.exp(-time * egvals))).sum(axis=1)
             dgmOrd0, dgmExt0, dgmRel1, dgmExt1 = apply_graph_extended_persistence(A, filtration_val,
@@ -72,7 +73,7 @@ def atol_feats_graphs(graph_folder, all_diags, atol_objs):
         if not np.sum([np.size(_.inertias) for _ in atol_objs.values()]):
             continue
         for (dtype, filt), atol_obj in atol_objs.items():
-            diag_feats = atol_obj.transform(all_diags[(dtype, filt, gid)])
+            diag_feats = atol_obj(all_diags[(dtype, filt, gid)])
             [feats.append({"index": gid, "type": dtype+"-"+filt, "center": idx_center, "value": _, "label": label})
              for idx_center, _ in enumerate(diag_feats)]
     return feats
@@ -97,10 +98,8 @@ def _fit(learner, train_feats, score=accuracy_score):
     return learner
 
 
-def graph_tenfold(graph_folder, atol_params):
+def graph_tenfold(graph_folder, filtrations, n_centers=10):
     sampling = "index"
-    filtrations = atol_params["filtrations"]
-    n_centers = atol_params["n_centers"]
 
     num_elements = len(os.listdir(graph_folder + "mat/"))
     array_indices = np.arange(num_elements)
@@ -110,7 +109,7 @@ def graph_tenfold(graph_folder, atol_params):
             graph_folder + "diagrams/%s/graph_%06i_filt_%s.csv" % (dtype, gid, filt))
     atol_objs = {}
     for dtype, filt in product(graph_dtypes, filtrations):
-        atol_objs[(dtype, filt)] = Atol(n_centers=n_centers)
+        atol_objs[(dtype, filt)] = Atol(quantiser=MiniBatchKMeans(n_clusters=n_centers))
     length = num_elements // 10
 
     np.random.shuffle(array_indices)
@@ -122,7 +121,7 @@ def graph_tenfold(graph_folder, atol_params):
 
         time1 = time.time()
         for dtype, filt in product(graph_dtypes, filtrations):
-            atol_objs[(dtype, filt)].fit(diags=[all_diags[(dtype, filt, gid)] for gid in train_indices])
+            atol_objs[(dtype, filt)].fit([all_diags[(dtype, filt, gid)] for gid in train_indices])
         feats = pd.DataFrame(atol_feats_graphs(graph_folder, all_diags, atol_objs),
                              columns=["index", "type", "center", "value", "label"])
         time2 = time.time()
