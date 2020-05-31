@@ -81,7 +81,10 @@ class Atol(BaseEstimator, TransformerMixin):
         """
         if not hasattr(self.quantiser, 'fit'):
             raise TypeError("quantiser %s has no `fit` attribute." % (self.quantiser))
-
+        if len(X) < self.quantiser.n_clusters:
+            # in case there are not enough observations for fitting the quantiser, we add random points in [0, 1]^2
+            random_points = np.random.rand(self.quantiser.n_clusters-len(X), X[0].shape[1])
+            X.append(random_points)
         if sample_weight is None:
             sample_weight = np.concatenate([self.weighting_method(measure) for measure in X])
 
