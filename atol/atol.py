@@ -25,11 +25,8 @@ def _indicator_contrast(diags, centers, inertias, eps=1e-8):
 def _cloud_weighting(measure):
     return np.ones(shape=measure.shape[0])
 
-def _measure_weighting(measure):
-    return np.ones(shape=measure.shape[0]) / measure.shape[0]
-
 def _iidproba_weighting(measure):
-    return np.ones(shape=measure.shape[0]) / measure.shape[0]**2
+    return np.ones(shape=measure.shape[0]) / measure.shape[0]
 
 
 class Atol(BaseEstimator, TransformerMixin):
@@ -61,7 +58,6 @@ class Atol(BaseEstimator, TransformerMixin):
         self.inertias = np.full(self.quantiser.n_clusters, np.nan)
         self.weighting_method = {
             "cloud"   : _cloud_weighting,
-            "measure" : _measure_weighting,
             "iidproba": _iidproba_weighting,
         }.get(weighting_method, _cloud_weighting)
 
