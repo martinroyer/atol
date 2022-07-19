@@ -10,9 +10,11 @@ from itertools import product
 import shutil
 import time
 import warnings
+from itertools import combinations
 
 import numpy as np
 import pandas as pd
+import gudhi as gd
 from scipy.sparse import csgraph
 from scipy.linalg import eigh
 from scipy.io import loadmat
@@ -22,10 +24,21 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import LabelEncoder
 from sklearn.cluster import MiniBatchKMeans
 
-from perslay.utils import apply_graph_extended_persistence, get_base_simplex
 from .atol import Atol
 
 graph_dtypes = ["dgmOrd0", "dgmExt0", "dgmRel1", "dgmExt1"]
+
+
+def build_filtered_simplex(A, filtration_val, edge_threshold=0):
+    num_vertices = A.shape[0]
+    st = gd.SimplexTree()
+    [st.insert([i], filtration=-1e10) for i in range(num_vertices)]
+    for i, j in combinations(range(num_vertices), r=2):
+        if A[i, j] > edge_threshold:
+            st.insert([i, j], filtration=-1e10)
+    for i in range(num_vertices):
+        st.assign_filtration([i], filtration_val[i])
+    return st
 
 
 def compute_tda_for_graphs(graph_folder, filtrations):
@@ -48,10 +61,12 @@ def compute_tda_for_graphs(graph_folder, filtrations):
         for filtration in filtrations:
             time = float(filtration.split("-")[0])
             filtration_val = np.square(egvectors).dot(np.diag(np.exp(-time * egvals))).sum(axis=1)
-            dgmOrd0, dgmExt0, dgmRel1, dgmExt1 = apply_graph_extended_persistence(A, filtration_val,
-                                                                                  get_base_simplex(A))
-            [np.savetxt(diag_repo + "%s/graph_%06i_filt_%s.csv" % (dtype, gid, filtration), diag, delimiter=',')
-             for diag, dtype in zip([dgmOrd0, dgmExt0, dgmRel1, dgmExt1], graph_dtypes)]
+            st = build_filtered_simplex(A, filtration_val)
+            st.extend_filtration()
+            dgms = st.extended_persistence(min_persistence=1e-5)
+            [np.savetxt(diag_repo + "%s/graph_%06i_filt_%s.csv" % (dtype, gid, filtration), [pers[1] for pers in diag],
+                        delimiter=',')
+             for diag, dtype in zip(dgms, ["dgmOrd0", "dgmExt0", "dgmRel1", "dgmExt1"])]
     return
 
 
@@ -109,7 +124,7 @@ def graph_tenfold(graph_folder, filtrations, n_centers=10):
             graph_folder + "diagrams/%s/graph_%06i_filt_%s.csv" % (dtype, gid, filt))
     atol_objs = {}
     for dtype, filt in product(graph_dtypes, filtrations):
-        atol_objs[(dtype, filt)] = Atol(quantiser=MiniBatchKMeans(n_clusters=n_centers))
+        atol_objs[(dtype, filt)] = Atol(quantiser=MiniBatchKMeans(n_clusters=n_centers, batch_size=2048))
     length = num_elements // 10
 
     np.random.shuffle(array_indices)
